@@ -549,33 +549,45 @@ const ProjectBoard = () => {
             </TabsList>
           </Tabs>
 
-          <Select value={filterAssignee} onValueChange={setFilterAssignee}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Исполнитель" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все исполнители</SelectItem>
-              {users.map((user) => (
-                <SelectItem key={user.login} value={user.name}>
-                  {user.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Button
+            variant="outline"
+            onClick={() => setShowFilters(!showFilters)}
+          >
+            <Icon name="Filter" className="mr-2 h-4 w-4" />
+            Фильтры
+          </Button>
 
-          <Select value={filterTag} onValueChange={setFilterTag}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Тег" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все теги</SelectItem>
-              {availableTags.map((tag) => (
-                <SelectItem key={tag} value={tag}>
-                  {tag}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {showFilters && (
+            <>
+              <Select value={filterAssignee} onValueChange={setFilterAssignee}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Исполнитель" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все исполнители</SelectItem>
+                  {users.map((user) => (
+                    <SelectItem key={user.login} value={user.name}>
+                      {user.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={filterTag} onValueChange={setFilterTag}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Тег" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все теги</SelectItem>
+                  {availableTags.map((tag) => (
+                    <SelectItem key={tag} value={tag}>
+                      {tag}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
+          )}
         </div>
 
         <DndContext 
