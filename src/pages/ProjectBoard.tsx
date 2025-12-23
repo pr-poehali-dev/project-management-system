@@ -670,19 +670,19 @@ const ProjectBoard = () => {
                           </Button>
                         )}
                       </CardHeader>
-                      {statusTasks.length > 0 && (
-                        <CardContent className="space-y-3">
-                          <DroppableColumn statusId={status.id} isOver={isColumnOver}>
-                            {statusTasks.map((task) => (
-                              <div key={task.id} className="mb-3">
-                                <SortableTaskCard
-                                  task={task}
-                                  onClick={() => handleTaskClick(task)}
-                                  onToggleComplete={(e) => handleToggleComplete(task.id, e)}
-                                />
-                              </div>
-                            ))}
-                          </DroppableColumn>
+                      <CardContent className="space-y-3">
+                        <DroppableColumn statusId={status.id} isOver={isColumnOver}>
+                          {statusTasks.map((task) => (
+                            <div key={task.id} className="mb-3">
+                              <SortableTaskCard
+                                task={task}
+                                onClick={() => handleTaskClick(task)}
+                                onToggleComplete={(e) => handleToggleComplete(task.id, e)}
+                              />
+                            </div>
+                          ))}
+                        </DroppableColumn>
+                        {statusTasks.length > 0 && (
                           <Button
                             variant="outline"
                             className="w-full"
@@ -691,8 +691,8 @@ const ProjectBoard = () => {
                             <Icon name="Plus" className="mr-2 h-4 w-4" />
                             Добавить задачу
                           </Button>
-                        </CardContent>
-                      )}
+                        )}
+                      </CardContent>
                     </Card>
                   </div>
                 </SortableContext>

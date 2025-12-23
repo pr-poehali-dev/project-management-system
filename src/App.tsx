@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Projects from "./pages/Projects";
 import ProjectBoard from "./pages/ProjectBoard";
+import ProjectInvite from "./pages/ProjectInvite";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
 
@@ -27,6 +28,7 @@ const App = () => (
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
           <Route path="/project/:id" element={<ProtectedRoute><ProjectBoard /></ProtectedRoute>} />
+          <Route path="/invite/:projectId" element={<ProjectInvite />} />
           <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
           <Route path="*" element={<NotFound />} />
         </Routes>

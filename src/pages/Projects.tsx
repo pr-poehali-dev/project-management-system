@@ -13,6 +13,7 @@ interface Project {
   title: string;
   description: string;
   createdAt: string;
+  members: string[];
 }
 
 const Projects = () => {
@@ -26,8 +27,33 @@ const Projects = () => {
 
   useEffect(() => {
     const savedProjects = JSON.parse(localStorage.getItem('projects') || '[]');
-    setProjects(savedProjects);
-  }, []);
+    const userProjects = savedProjects.filter((p: Project) => 
+      p.members?.includes(currentUser.login) || !p.members
+    ).map((p: Project) => ({
+      ...p,
+      members: p.members || [currentUser.login]
+    }));
+    setProjects(userProjects);
+
+    const inviteProjectId = localStorage.getItem('pendingProjectInvite');
+    if (inviteProjectId) {
+      const projectToJoin = savedProjects.find((p: Project) => p.id === inviteProjectId);
+      if (projectToJoin && !projectToJoin.members?.includes(currentUser.login)) {
+        const updatedMembers = [...(projectToJoin.members || []), currentUser.login];
+        const updatedProjects = savedProjects.map((p: Project) =>
+          p.id === inviteProjectId ? { ...p, members: updatedMembers } : p
+        );
+        localStorage.setItem('projects', JSON.stringify(updatedProjects));
+        toast({ title: 'Вы добавлены в проект!', description: projectToJoin.title });
+      }
+      localStorage.removeItem('pendingProjectInvite');
+      const updatedProjects = JSON.parse(localStorage.getItem('projects') || '[]');
+      const newUserProjects = updatedProjects.filter((p: Project) => 
+        p.members?.includes(currentUser.login)
+      );
+      setProjects(newUserProjects);
+    }
+  }, []);}
 
   const handleCreateProject = () => {
     if (!title) {
@@ -40,6 +66,7 @@ const Projects = () => {
       title,
       description,
       createdAt: new Date().toISOString(),
+      members: [currentUser.login],
     };
 
     const updatedProjects = [...projects, newProject];
@@ -63,6 +90,13 @@ const Projects = () => {
   const handleLogout = () => {
     localStorage.removeItem('currentUser');
     navigate('/login');
+  };
+
+  const handleCopyInviteLink = (projectId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const inviteLink = `${window.location.origin}/invite/${projectId}`;
+    navigator.clipboard.writeText(inviteLink);
+    toast({ title: 'Ссылка скопирована!', description: 'Поделитесь ею для приглашения' });
   };
 
   return (
@@ -137,7 +171,7 @@ const Projects = () => {
             {projects.map((project) => (
               <Card
                 key={project.id}
-                className="cursor-pointer hover:shadow-lg transition-shadow"
+                className="cursor-pointer hover:shadow-lg transition-shadow relative"
                 onClick={() => navigate(`/project/${project.id}`)}
               >
                 <CardHeader>
@@ -150,9 +184,19 @@ const Projects = () => {
                   <p className="text-sm text-muted-foreground line-clamp-2">
                     {project.description || 'Без описания'}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-4">
-                    {new Date(project.createdAt).toLocaleDateString('ru-RU')}
-                  </p>
+                  <div className="flex items-center justify-between mt-4">
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(project.createdAt).toLocaleDateString('ru-RU')}
+                    </p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => handleCopyInviteLink(project.id, e)}
+                      className="h-8"
+                    >
+                      <Icon name="Link" className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))}
