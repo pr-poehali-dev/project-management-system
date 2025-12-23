@@ -201,6 +201,7 @@ const ProjectBoard = () => {
   const [overId, setOverId] = useState<string | null>(null);
   const [filterAssignee, setFilterAssignee] = useState<string>('all');
   const [filterTag, setFilterTag] = useState<string>('all');
+  const [showFilters, setShowFilters] = useState(false);
   
   const [taskForm, setTaskForm] = useState({
     title: '',
