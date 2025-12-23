@@ -483,6 +483,20 @@ const ProjectBoard = () => {
     setNewStatusName('');
   };
 
+  const handleDeleteStatus = (statusId: string) => {
+    const statusTasks = tasks.filter((t) => t.statusId === statusId);
+    if (statusTasks.length > 0) {
+      toast({ title: 'Ошибка', description: 'Нельзя удалить статус с задачами', variant: 'destructive' });
+      return;
+    }
+
+    const allStatuses = JSON.parse(localStorage.getItem('statuses') || '[]');
+    const updatedStatuses = allStatuses.filter((s: Status) => s.id !== statusId);
+    localStorage.setItem('statuses', JSON.stringify(updatedStatuses));
+    setStatuses(updatedStatuses.filter((s: Status) => s.projectId === id));
+    toast({ title: 'Статус удалён', description: 'Колонка успешно удалена' });
+  };
+
   const getFilteredTasks = () => {
     let filtered = tasks;
 
