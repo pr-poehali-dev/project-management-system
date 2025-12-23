@@ -10,9 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import Icon from '@/components/ui/icon';
 import { useToast } from '@/hooks/use-toast';
-import { DndContext, DragEndEvent, DragOverlay, closestCorners, PointerSensor, useSensor, useSensors, DragOverEvent } from '@dnd-kit/core';
+import { DndContext, DragEndEvent, DragOverlay, closestCorners, PointerSensor, useSensor, useSensors, DragOverEvent, useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -92,11 +93,20 @@ const CommentThread = ({
   );
 };
 
-const DroppableColumn = ({ statusId, children }: { statusId: string; children: React.ReactNode }) => {
+const DroppableColumn = ({ statusId, children, isOver }: { statusId: string; children: React.ReactNode; isOver: boolean }) => {
+  const { setNodeRef } = useDroppable({
+    id: statusId,
+    data: {
+      type: 'column',
+      statusId
+    }
+  });
+
   return (
     <div
+      ref={setNodeRef}
       data-droppable-id={statusId}
-      style={{ minHeight: '200px' }}
+      className={`min-h-[200px] transition-all ${isOver ? 'ring-2 ring-primary ring-offset-2' : ''}`}
     >
       {children}
     </div>
@@ -189,6 +199,8 @@ const ProjectBoard = () => {
   const [filteredTags, setFilteredTags] = useState<string[]>([]);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  const [filterAssignee, setFilterAssignee] = useState<string>('all');
+  const [filterTag, setFilterTag] = useState<string>('all');
   
   const [taskForm, setTaskForm] = useState({
     title: '',
@@ -214,12 +226,9 @@ const ProjectBoard = () => {
   }, [id]);
 
   useEffect(() => {
-    const allTags = new Set<string>();
-    tasks.forEach((task) => {
-      task.tags?.forEach((tag) => allTags.add(tag));
-    });
-    setAvailableTags(Array.from(allTags));
-  }, [tasks]);
+    const allProjectTags = JSON.parse(localStorage.getItem(`projectTags_${id}`) || '[]');
+    setAvailableTags(allProjectTags);
+  }, [id, tasks]);
 
   useEffect(() => {
     if (tagInput) {
@@ -251,6 +260,14 @@ const ProjectBoard = () => {
 
     const allUsers = JSON.parse(localStorage.getItem('users') || '[]');
     setUsers([{ login: 'admin', name: 'Администратор' }, ...allUsers]);
+
+    const allProjectTags = new Set<string>();
+    projectTasks.forEach((task: Task) => {
+      task.tags?.forEach((tag) => allProjectTags.add(tag));
+    });
+    const projectTagsArray = Array.from(allProjectTags);
+    localStorage.setItem(`projectTags_${id}`, JSON.stringify(projectTagsArray));
+    setAvailableTags(projectTagsArray);
   };
 
   const buildCommentTree = (comments: CommentType[]): CommentType[] => {
@@ -282,7 +299,19 @@ const ProjectBoard = () => {
 
   const handleDragOver = (event: DragOverEvent) => {
     const { over } = event;
-    setOverId(over ? (over.id as string) : null);
+    if (over) {
+      const overId = over.id as string;
+      if (statuses.some((s) => s.id === overId)) {
+        setOverId(overId);
+      } else {
+        const overTask = tasks.find((t) => t.id === overId);
+        if (overTask) {
+          setOverId(overTask.statusId);
+        }
+      }
+    } else {
+      setOverId(null);
+    }
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -332,6 +361,19 @@ const ProjectBoard = () => {
     setIsTaskDialogOpen(true);
   };
 
+  const handleDeleteTask = () => {
+    if (!selectedTask) return;
+
+    const allTasks = JSON.parse(localStorage.getItem('tasks') || '[]');
+    const updatedTasks = allTasks.filter((t: Task) => t.id !== selectedTask.id);
+    localStorage.setItem('tasks', JSON.stringify(updatedTasks));
+    
+    loadData();
+    setIsTaskDialogOpen(false);
+    setSelectedTask(null);
+    toast({ title: 'Задача удалена', description: 'Задача успешно удалена' });
+  };
+
   const handleSaveTask = () => {
     if (!taskForm.title) {
       toast({ title: 'Ошибка', description: 'Введите название задачи', variant: 'destructive' });
@@ -356,6 +398,10 @@ const ProjectBoard = () => {
       const updatedTasks = [...allTasks, newTask];
       localStorage.setItem('tasks', JSON.stringify(updatedTasks));
     }
+
+    const allProjectTags = new Set(availableTags);
+    taskForm.tags.forEach((tag) => allProjectTags.add(tag));
+    localStorage.setItem(`projectTags_${id}`, JSON.stringify(Array.from(allProjectTags)));
 
     loadData();
     setTaskForm({ title: '', description: '', deadline: '', assignee: '', tags: [], statusId: '' });
@@ -437,14 +483,26 @@ const ProjectBoard = () => {
   };
 
   const getFilteredTasks = () => {
+    let filtered = tasks;
+
     switch (filterMode) {
       case 'active':
-        return tasks.filter((t) => !t.completed);
+        filtered = filtered.filter((t) => !t.completed);
+        break;
       case 'completed':
-        return tasks.filter((t) => t.completed);
-      default:
-        return tasks;
+        filtered = filtered.filter((t) => t.completed);
+        break;
     }
+
+    if (filterAssignee !== 'all') {
+      filtered = filtered.filter((t) => t.assignee === filterAssignee);
+    }
+
+    if (filterTag !== 'all') {
+      filtered = filtered.filter((t) => t.tags?.includes(filterTag));
+    }
+
+    return filtered;
   };
 
   if (!project) return null;
@@ -467,7 +525,7 @@ const ProjectBoard = () => {
       </header>
 
       <main className="container mx-auto px-6 py-8">
-        <div className="mb-6">
+        <div className="mb-6 flex gap-4 items-center flex-wrap">
           <Tabs value={filterMode} onValueChange={(v) => setFilterMode(v as any)}>
             <TabsList>
               <TabsTrigger value="all">Все</TabsTrigger>
@@ -475,6 +533,34 @@ const ProjectBoard = () => {
               <TabsTrigger value="completed">Закрытые</TabsTrigger>
             </TabsList>
           </Tabs>
+
+          <Select value={filterAssignee} onValueChange={setFilterAssignee}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Исполнитель" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все исполнители</SelectItem>
+              {users.map((user) => (
+                <SelectItem key={user.login} value={user.name}>
+                  {user.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={filterTag} onValueChange={setFilterTag}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Тег" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все теги</SelectItem>
+              {availableTags.map((tag) => (
+                <SelectItem key={tag} value={tag}>
+                  {tag}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <DndContext 
@@ -487,6 +573,7 @@ const ProjectBoard = () => {
           <div className="flex gap-6 overflow-x-auto pb-4">
             {statuses.map((status) => {
               const statusTasks = filteredTasks.filter((task) => task.statusId === status.id);
+              const isColumnOver = overId === status.id;
               
               return (
                 <SortableContext 
@@ -499,7 +586,7 @@ const ProjectBoard = () => {
                     className="min-w-[320px] flex-shrink-0"
                     data-status-id={status.id}
                   >
-                    <Card className={`h-full ${overId === status.id ? 'ring-2 ring-primary' : ''}`}>
+                    <Card className={`h-full transition-all ${isColumnOver ? 'ring-2 ring-primary shadow-lg' : ''}`}>
                       <CardHeader className="pb-3">
                         {editingStatusId === status.id ? (
                           <div className="flex gap-2">
@@ -522,28 +609,40 @@ const ProjectBoard = () => {
                             {status.name}
                           </CardTitle>
                         )}
+                        {statusTasks.length === 0 && (
+                          <Button
+                            variant="outline"
+                            className="w-full mt-3"
+                            onClick={() => handleCreateTask(status.id)}
+                          >
+                            <Icon name="Plus" className="mr-2 h-4 w-4" />
+                            Добавить задачу
+                          </Button>
+                        )}
                       </CardHeader>
-                      <CardContent className="space-y-3 min-h-[200px]">
-                        <DroppableColumn statusId={status.id}>
-                          {statusTasks.map((task) => (
-                            <div key={task.id} className="mb-3">
-                              <SortableTaskCard
-                                task={task}
-                                onClick={() => handleTaskClick(task)}
-                                onToggleComplete={(e) => handleToggleComplete(task.id, e)}
-                              />
-                            </div>
-                          ))}
-                        </DroppableColumn>
-                        <Button
-                          variant="outline"
-                          className="w-full"
-                          onClick={() => handleCreateTask(status.id)}
-                        >
-                          <Icon name="Plus" className="mr-2 h-4 w-4" />
-                          Добавить задачу
-                        </Button>
-                      </CardContent>
+                      {statusTasks.length > 0 && (
+                        <CardContent className="space-y-3">
+                          <DroppableColumn statusId={status.id} isOver={isColumnOver}>
+                            {statusTasks.map((task) => (
+                              <div key={task.id} className="mb-3">
+                                <SortableTaskCard
+                                  task={task}
+                                  onClick={() => handleTaskClick(task)}
+                                  onToggleComplete={(e) => handleToggleComplete(task.id, e)}
+                                />
+                              </div>
+                            ))}
+                          </DroppableColumn>
+                          <Button
+                            variant="outline"
+                            className="w-full"
+                            onClick={() => handleCreateTask(status.id)}
+                          >
+                            <Icon name="Plus" className="mr-2 h-4 w-4" />
+                            Добавить задачу
+                          </Button>
+                        </CardContent>
+                      )}
                     </Card>
                   </div>
                 </SortableContext>
@@ -599,26 +698,50 @@ const ProjectBoard = () => {
           </DialogHeader>
           <div className="space-y-4">
             {selectedTask && (
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="completed"
-                  checked={selectedTask.completed}
-                  onCheckedChange={(checked) => {
-                    const allTasks = JSON.parse(localStorage.getItem('tasks') || '[]');
-                    const updatedTasks = allTasks.map((t: Task) =>
-                      t.id === selectedTask.id ? { ...t, completed: !!checked } : t
-                    );
-                    localStorage.setItem('tasks', JSON.stringify(updatedTasks));
-                    setSelectedTask({ ...selectedTask, completed: !!checked });
-                    loadData();
-                  }}
-                />
-                <Label
-                  htmlFor="completed"
-                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                >
-                  {selectedTask.completed ? 'Закрыто' : 'Активно'}
-                </Label>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="completed"
+                    checked={selectedTask.completed}
+                    onCheckedChange={(checked) => {
+                      const allTasks = JSON.parse(localStorage.getItem('tasks') || '[]');
+                      const updatedTasks = allTasks.map((t: Task) =>
+                        t.id === selectedTask.id ? { ...t, completed: !!checked } : t
+                      );
+                      localStorage.setItem('tasks', JSON.stringify(updatedTasks));
+                      setSelectedTask({ ...selectedTask, completed: !!checked });
+                      loadData();
+                    }}
+                  />
+                  <Label
+                    htmlFor="completed"
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                  >
+                    {selectedTask.completed ? 'Закрыто' : 'Активно'}
+                  </Label>
+                </div>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" size="sm">
+                      <Icon name="Trash2" className="mr-2 h-4 w-4" />
+                      Удалить
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Удалить задачу?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Это действие нельзя отменить. Задача будет удалена навсегда.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Отмена</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleDeleteTask}>
+                        Удалить
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             )}
             
