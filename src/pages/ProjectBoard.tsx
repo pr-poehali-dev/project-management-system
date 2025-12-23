@@ -613,7 +613,7 @@ const ProjectBoard = () => {
                     className="min-w-[320px] flex-shrink-0"
                     data-status-id={status.id}
                   >
-                    <Card className={`h-full transition-all ${isColumnOver ? 'ring-2 ring-primary shadow-lg' : ''}`}>
+                    <Card className={`h-full transition-all ${isColumnOver ? 'border-2 border-primary shadow-lg' : ''}`}>
                       <CardHeader className="pb-3">
                         {editingStatusId === status.id ? (
                           <div className="flex gap-2">
