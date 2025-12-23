@@ -8,9 +8,11 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Icon from '@/components/ui/icon';
 import { useToast } from '@/hooks/use-toast';
-import { DndContext, DragEndEvent, DragOverlay, closestCorners, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { DndContext, DragEndEvent, DragOverlay, closestCorners, PointerSensor, useSensor, useSensors, DragOverEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -21,18 +23,20 @@ interface Task {
   description: string;
   deadline: string;
   assignee: string;
-  tag: string;
+  tags: string[];
   statusId: string;
   projectId: string;
-  comments: Comment[];
+  comments: CommentType[];
   completed: boolean;
 }
 
-interface Comment {
+interface CommentType {
   id: string;
   text: string;
   author: string;
   createdAt: string;
+  parentId: string | null;
+  replies?: CommentType[];
 }
 
 interface Status {
@@ -41,8 +45,80 @@ interface Status {
   projectId: string;
 }
 
-const SortableTaskCard = ({ task, onClick, onToggleComplete }: { task: Task; onClick: () => void; onToggleComplete: (e: React.MouseEvent) => void }) => {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
+const CommentThread = ({ 
+  comment, 
+  onReply, 
+  level = 0 
+}: { 
+  comment: CommentType; 
+  onReply: (parentId: string) => void;
+  level?: number;
+}) => {
+  return (
+    <div className={`${level > 0 ? 'ml-6 mt-2' : ''}`}>
+      <Card>
+        <CardContent className="p-3">
+          <div className="flex justify-between items-start mb-1">
+            <span className="font-semibold text-sm">{comment.author}</span>
+            <span className="text-xs text-muted-foreground">
+              {new Date(comment.createdAt).toLocaleString('ru-RU')}
+            </span>
+          </div>
+          <p className="text-sm mb-2">{comment.text}</p>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onReply(comment.id)}
+            className="h-7 text-xs"
+          >
+            <Icon name="Reply" className="h-3 w-3 mr-1" />
+            Ответить
+          </Button>
+        </CardContent>
+      </Card>
+      {comment.replies && comment.replies.length > 0 && (
+        <div className="space-y-2 mt-2">
+          {comment.replies.map((reply) => (
+            <CommentThread
+              key={reply.id}
+              comment={reply}
+              onReply={onReply}
+              level={level + 1}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const DroppableColumn = ({ statusId, children }: { statusId: string; children: React.ReactNode }) => {
+  return (
+    <div
+      data-droppable-id={statusId}
+      style={{ minHeight: '200px' }}
+    >
+      {children}
+    </div>
+  );
+};
+
+const SortableTaskCard = ({ 
+  task, 
+  onClick, 
+  onToggleComplete 
+}: { 
+  task: Task; 
+  onClick: () => void; 
+  onToggleComplete: (e: React.MouseEvent) => void;
+}) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ 
+    id: task.id,
+    data: {
+      type: 'task',
+      task
+    }
+  });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -77,6 +153,15 @@ const SortableTaskCard = ({ task, onClick, onToggleComplete }: { task: Task; onC
               <Icon name="User" className="h-4 w-4" />
               <span>{task.assignee || 'Не назначен'}</span>
             </div>
+            {task.tags && task.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {task.tags.map((tag, idx) => (
+                  <Badge key={idx} variant="secondary" className="text-xs">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -98,13 +183,19 @@ const ProjectBoard = () => {
   const [newComment, setNewComment] = useState('');
   const [users, setUsers] = useState<any[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [filterMode, setFilterMode] = useState<'all' | 'active' | 'completed'>('all');
+  const [tagInput, setTagInput] = useState('');
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [filteredTags, setFilteredTags] = useState<string[]>([]);
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
   
   const [taskForm, setTaskForm] = useState({
     title: '',
     description: '',
     deadline: '',
     assignee: '',
-    tag: '',
+    tags: [] as string[],
     statusId: '',
   });
 
@@ -122,6 +213,25 @@ const ProjectBoard = () => {
     loadData();
   }, [id]);
 
+  useEffect(() => {
+    const allTags = new Set<string>();
+    tasks.forEach((task) => {
+      task.tags?.forEach((tag) => allTags.add(tag));
+    });
+    setAvailableTags(Array.from(allTags));
+  }, [tasks]);
+
+  useEffect(() => {
+    if (tagInput) {
+      const filtered = availableTags.filter((tag) =>
+        tag.toLowerCase().includes(tagInput.toLowerCase())
+      );
+      setFilteredTags(filtered);
+    } else {
+      setFilteredTags([]);
+    }
+  }, [tagInput, availableTags]);
+
   const loadData = () => {
     const projects = JSON.parse(localStorage.getItem('projects') || '[]');
     const foundProject = projects.find((p: any) => p.id === id);
@@ -132,25 +242,65 @@ const ProjectBoard = () => {
     setStatuses(projectStatuses);
 
     const allTasks = JSON.parse(localStorage.getItem('tasks') || '[]');
-    const projectTasks = allTasks.filter((t: Task) => t.projectId === id);
+    const projectTasks = allTasks.filter((t: Task) => t.projectId === id).map((t: Task) => ({
+      ...t,
+      tags: t.tags || [],
+      completed: t.completed || false,
+    }));
     setTasks(projectTasks);
 
     const allUsers = JSON.parse(localStorage.getItem('users') || '[]');
     setUsers([{ login: 'admin', name: 'Администратор' }, ...allUsers]);
   };
 
+  const buildCommentTree = (comments: CommentType[]): CommentType[] => {
+    const commentMap = new Map<string, CommentType>();
+    const roots: CommentType[] = [];
+
+    comments.forEach((comment) => {
+      commentMap.set(comment.id, { ...comment, replies: [] });
+    });
+
+    comments.forEach((comment) => {
+      const node = commentMap.get(comment.id)!;
+      if (comment.parentId) {
+        const parent = commentMap.get(comment.parentId);
+        if (parent) {
+          parent.replies!.push(node);
+        }
+      } else {
+        roots.push(node);
+      }
+    });
+
+    return roots;
+  };
+
   const handleDragStart = (event: any) => {
     setActiveId(event.active.id);
+  };
+
+  const handleDragOver = (event: DragOverEvent) => {
+    const { over } = event;
+    setOverId(over ? (over.id as string) : null);
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveId(null);
+    setOverId(null);
 
     if (!over) return;
 
     const taskId = active.id as string;
-    const targetStatusId = over.id as string;
+    let targetStatusId = over.id as string;
+
+    if (!statuses.some((s) => s.id === targetStatusId)) {
+      const overTask = tasks.find((t) => t.id === targetStatusId);
+      if (overTask) {
+        targetStatusId = overTask.statusId;
+      }
+    }
 
     const task = tasks.find((t) => t.id === taskId);
     if (!task) return;
@@ -177,7 +327,7 @@ const ProjectBoard = () => {
   };
 
   const handleCreateTask = (statusId: string) => {
-    setTaskForm({ title: '', description: '', deadline: '', assignee: '', tag: '', statusId });
+    setTaskForm({ title: '', description: '', deadline: '', assignee: '', tags: [], statusId });
     setSelectedTask(null);
     setIsTaskDialogOpen(true);
   };
@@ -208,7 +358,7 @@ const ProjectBoard = () => {
     }
 
     loadData();
-    setTaskForm({ title: '', description: '', deadline: '', assignee: '', tag: '', statusId: '' });
+    setTaskForm({ title: '', description: '', deadline: '', assignee: '', tags: [], statusId: '' });
     setIsTaskDialogOpen(false);
     toast({ title: 'Готово!', description: selectedTask ? 'Задача обновлена' : 'Задача создана' });
   };
@@ -220,20 +370,33 @@ const ProjectBoard = () => {
       description: task.description,
       deadline: task.deadline,
       assignee: task.assignee,
-      tag: task.tag,
+      tags: task.tags || [],
       statusId: task.statusId,
     });
     setIsTaskDialogOpen(true);
   };
 
+  const handleAddTag = () => {
+    const trimmedTag = tagInput.trim();
+    if (trimmedTag && !taskForm.tags.includes(trimmedTag)) {
+      setTaskForm({ ...taskForm, tags: [...taskForm.tags, trimmedTag] });
+      setTagInput('');
+    }
+  };
+
+  const handleRemoveTag = (tagToRemove: string) => {
+    setTaskForm({ ...taskForm, tags: taskForm.tags.filter((tag) => tag !== tagToRemove) });
+  };
+
   const handleAddComment = () => {
     if (!newComment || !selectedTask) return;
 
-    const comment: Comment = {
+    const comment: CommentType = {
       id: Date.now().toString(),
       text: newComment,
       author: currentUser.name,
       createdAt: new Date().toISOString(),
+      parentId: replyingTo,
     };
 
     const allTasks = JSON.parse(localStorage.getItem('tasks') || '[]');
@@ -245,6 +408,7 @@ const ProjectBoard = () => {
     loadData();
     setSelectedTask({ ...selectedTask, comments: [...(selectedTask.comments || []), comment] });
     setNewComment('');
+    setReplyingTo(null);
   };
 
   const handleAddStatus = () => {
@@ -272,9 +436,21 @@ const ProjectBoard = () => {
     setNewStatusName('');
   };
 
+  const getFilteredTasks = () => {
+    switch (filterMode) {
+      case 'active':
+        return tasks.filter((t) => !t.completed);
+      case 'completed':
+        return tasks.filter((t) => t.completed);
+      default:
+        return tasks;
+    }
+  };
+
   if (!project) return null;
 
   const activeTask = tasks.find((t) => t.id === activeId);
+  const filteredTasks = getFilteredTasks();
 
   return (
     <div className="min-h-screen bg-background">
@@ -291,64 +467,88 @@ const ProjectBoard = () => {
       </header>
 
       <main className="container mx-auto px-6 py-8">
-        <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <div className="mb-6">
+          <Tabs value={filterMode} onValueChange={(v) => setFilterMode(v as any)}>
+            <TabsList>
+              <TabsTrigger value="all">Все</TabsTrigger>
+              <TabsTrigger value="active">Активные</TabsTrigger>
+              <TabsTrigger value="completed">Закрытые</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+
+        <DndContext 
+          sensors={sensors} 
+          collisionDetection={closestCorners} 
+          onDragStart={handleDragStart} 
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+        >
           <div className="flex gap-6 overflow-x-auto pb-4">
-            {statuses.map((status) => (
-              <SortableContext key={status.id} items={tasks.filter((t) => t.statusId === status.id).map((t) => t.id)} strategy={verticalListSortingStrategy}>
-                <div id={status.id} className="min-w-[320px] flex-shrink-0">
-                  <Card className="h-full">
-                    <CardHeader className="pb-3">
-                      {editingStatusId === status.id ? (
-                        <div className="flex gap-2">
-                          <Input
-                            value={newStatusName}
-                            onChange={(e) => setNewStatusName(e.target.value)}
-                            onBlur={() => handleRenameStatus(status.id)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleRenameStatus(status.id)}
-                            autoFocus
-                          />
-                        </div>
-                      ) : (
-                        <CardTitle
-                          className="cursor-pointer hover:text-primary transition-colors"
-                          onClick={() => {
-                            setEditingStatusId(status.id);
-                            setNewStatusName(status.name);
-                          }}
+            {statuses.map((status) => {
+              const statusTasks = filteredTasks.filter((task) => task.statusId === status.id);
+              
+              return (
+                <SortableContext 
+                  key={status.id} 
+                  items={statusTasks.map((t) => t.id)} 
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div 
+                    id={status.id} 
+                    className="min-w-[320px] flex-shrink-0"
+                    data-status-id={status.id}
+                  >
+                    <Card className={`h-full ${overId === status.id ? 'ring-2 ring-primary' : ''}`}>
+                      <CardHeader className="pb-3">
+                        {editingStatusId === status.id ? (
+                          <div className="flex gap-2">
+                            <Input
+                              value={newStatusName}
+                              onChange={(e) => setNewStatusName(e.target.value)}
+                              onBlur={() => handleRenameStatus(status.id)}
+                              onKeyDown={(e) => e.key === 'Enter' && handleRenameStatus(status.id)}
+                              autoFocus
+                            />
+                          </div>
+                        ) : (
+                          <CardTitle
+                            className="cursor-pointer hover:text-primary transition-colors"
+                            onClick={() => {
+                              setEditingStatusId(status.id);
+                              setNewStatusName(status.name);
+                            }}
+                          >
+                            {status.name}
+                          </CardTitle>
+                        )}
+                      </CardHeader>
+                      <CardContent className="space-y-3 min-h-[200px]">
+                        <DroppableColumn statusId={status.id}>
+                          {statusTasks.map((task) => (
+                            <div key={task.id} className="mb-3">
+                              <SortableTaskCard
+                                task={task}
+                                onClick={() => handleTaskClick(task)}
+                                onToggleComplete={(e) => handleToggleComplete(task.id, e)}
+                              />
+                            </div>
+                          ))}
+                        </DroppableColumn>
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          onClick={() => handleCreateTask(status.id)}
                         >
-                          {status.name}
-                        </CardTitle>
-                      )}
-                    </CardHeader>
-                    <CardContent
-                      className="space-y-3 min-h-[200px]"
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={() => {}}
-                      data-status-id={status.id}
-                    >
-                      {tasks
-                        .filter((task) => task.statusId === status.id)
-                        .map((task) => (
-                          <SortableTaskCard
-                            key={task.id}
-                            task={task}
-                            onClick={() => handleTaskClick(task)}
-                            onToggleComplete={(e) => handleToggleComplete(task.id, e)}
-                          />
-                        ))}
-                      <Button
-                        variant="outline"
-                        className="w-full"
-                        onClick={() => handleCreateTask(status.id)}
-                      >
-                        <Icon name="Plus" className="mr-2 h-4 w-4" />
-                        Добавить задачу
-                      </Button>
-                    </CardContent>
-                  </Card>
-                </div>
-              </SortableContext>
-            ))}
+                          <Icon name="Plus" className="mr-2 h-4 w-4" />
+                          Добавить задачу
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </SortableContext>
+              );
+            })}
 
             <div className="min-w-[320px] flex-shrink-0">
               <Button
@@ -376,17 +576,15 @@ const ProjectBoard = () => {
 
       <Dialog open={isTaskDialogOpen} onOpenChange={setIsTaskDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
+          <DialogHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
             <DialogTitle>{selectedTask ? 'Редактировать задачу' : 'Новая задача'}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="status">Статус</Label>
+            <div className="flex items-center gap-2">
+              <Label className="text-sm">Статус:</Label>
               <Select
                 value={taskForm.statusId}
                 onValueChange={(value) => setTaskForm({ ...taskForm, statusId: value })}
               >
-                <SelectTrigger>
+                <SelectTrigger className="w-[180px] h-8">
                   <SelectValue placeholder="Выберите" />
                 </SelectTrigger>
                 <SelectContent>
@@ -398,6 +596,32 @@ const ProjectBoard = () => {
                 </SelectContent>
               </Select>
             </div>
+          </DialogHeader>
+          <div className="space-y-4">
+            {selectedTask && (
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="completed"
+                  checked={selectedTask.completed}
+                  onCheckedChange={(checked) => {
+                    const allTasks = JSON.parse(localStorage.getItem('tasks') || '[]');
+                    const updatedTasks = allTasks.map((t: Task) =>
+                      t.id === selectedTask.id ? { ...t, completed: !!checked } : t
+                    );
+                    localStorage.setItem('tasks', JSON.stringify(updatedTasks));
+                    setSelectedTask({ ...selectedTask, completed: !!checked });
+                    loadData();
+                  }}
+                />
+                <Label
+                  htmlFor="completed"
+                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                >
+                  {selectedTask.completed ? 'Закрыто' : 'Активно'}
+                </Label>
+              </div>
+            )}
+            
             <div className="space-y-2">
               <Label htmlFor="title">Название</Label>
               <Input
@@ -445,38 +669,91 @@ const ProjectBoard = () => {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="tag">Тег</Label>
-              <Input
-                id="tag"
-                value={taskForm.tag}
-                onChange={(e) => setTaskForm({ ...taskForm, tag: e.target.value })}
-                placeholder="frontend, backend..."
-              />
+              <Label htmlFor="tags">Теги</Label>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {taskForm.tags.map((tag, idx) => (
+                  <Badge key={idx} variant="secondary" className="gap-1">
+                    {tag}
+                    <button
+                      onClick={() => handleRemoveTag(tag)}
+                      className="ml-1 hover:text-destructive"
+                    >
+                      ×
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+              <div className="relative">
+                <Input
+                  id="tags"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddTag();
+                    }
+                  }}
+                  placeholder="Введите тег и нажмите Enter"
+                />
+                {filteredTags.length > 0 && tagInput && (
+                  <Card className="absolute z-10 w-full mt-1">
+                    <CardContent className="p-2">
+                      {filteredTags.map((tag, idx) => (
+                        <div
+                          key={idx}
+                          className="p-2 hover:bg-accent cursor-pointer rounded"
+                          onClick={() => {
+                            if (!taskForm.tags.includes(tag)) {
+                              setTaskForm({ ...taskForm, tags: [...taskForm.tags, tag] });
+                            }
+                            setTagInput('');
+                          }}
+                        >
+                          {tag}
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
             </div>
 
             {selectedTask && (
               <div className="space-y-3 pt-4 border-t">
                 <Label>Комментарии</Label>
-                <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                  {selectedTask.comments?.map((comment) => (
-                    <Card key={comment.id}>
-                      <CardContent className="p-3">
-                        <div className="flex justify-between items-start mb-1">
-                          <span className="font-semibold text-sm">{comment.author}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {new Date(comment.createdAt).toLocaleString('ru-RU')}
-                          </span>
-                        </div>
-                        <p className="text-sm">{comment.text}</p>
-                      </CardContent>
-                    </Card>
+                <div className="space-y-3 max-h-[300px] overflow-y-auto">
+                  {buildCommentTree(selectedTask.comments || []).map((comment) => (
+                    <CommentThread
+                      key={comment.id}
+                      comment={comment}
+                      onReply={(parentId) => setReplyingTo(parentId)}
+                    />
                   ))}
                 </div>
+                {replyingTo && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <span>Ответ на комментарий</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setReplyingTo(null)}
+                    >
+                      Отменить
+                    </Button>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <Input
-                    placeholder="Добавить комментарий..."
+                    placeholder={replyingTo ? "Написать ответ..." : "Добавить комментарий..."}
                     value={newComment}
                     onChange={(e) => setNewComment(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleAddComment();
+                      }
+                    }}
                   />
                   <Button onClick={handleAddComment}>
                     <Icon name="Send" className="h-4 w-4" />
